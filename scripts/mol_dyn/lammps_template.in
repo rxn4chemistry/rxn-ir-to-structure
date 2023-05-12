@@ -1,0 +1,56 @@
+# ----------------- Init -----------------
+units           real
+atom_style      full
+
+neigh_modify    delay 0 every 1
+
+
+pair_style      lj/cut/coul/long 12.0
+bond_style	harmonic
+special_bonds   lj/coul 0.0 0.0 1.0
+kspace_style    pppm 1e-6
+
+# ----------------- Atom Definition -----------------
+
+read_data {data}
+
+# ----------------- Force Field Settings -----------------
+
+include		{params}
+
+
+
+# ----------------- Equilibration -----------------
+
+timestep           0.5
+thermo             200
+
+#equilibration
+run                0
+velocity           all create 300 38564
+fix		   temp all langevin 300 300 100 1530917
+fix                1 all nve
+
+run                {steps}
+
+unfix temp
+
+
+# ----------------- Production -----------------
+
+#calculate dipole moment vector
+#WARNING: This definition of the dipole moment is ONLY valid when the system has 0 net charge, so you should verify that before use.
+compute            1 all property/atom q xu yu zu
+variable           dipolex atom c_1[1]*c_1[2]
+variable           dipoley atom c_1[1]*c_1[3]
+variable           dipolez atom c_1[1]*c_1[4]
+compute            2 all reduce sum v_dipolex
+compute            3 all reduce sum v_dipoley
+compute            4 all reduce sum v_dipolez
+variable           totaldipolex equal c_2
+variable           totaldipoley equal c_3
+variable           totaldipolez equal c_4
+variable           mytime equal step*dt
+fix                printdipole all ave/time 1 1 2 v_mytime v_totaldipolex v_totaldipoley v_totaldipolez file dipole.txt mode scalar
+
+run {steps} 

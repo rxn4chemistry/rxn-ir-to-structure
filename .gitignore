@@ -1,0 +1,8 @@
+test/
+*.py[cod]
+.mypy_cache
+examples/out
+examples/train
+examples/ir.p
+data/
+models/

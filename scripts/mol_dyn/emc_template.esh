@@ -1,0 +1,17 @@
+ITEM		OPTIONS
+
+replace		true
+mass		true
+ntotal		{atom_count}
+density		1
+field		{field}
+build_dir	{path}
+
+ITEM		END
+
+ITEM		SHORTHAND
+
+Mol		{smiles},100
+
+ITEM		END
+
