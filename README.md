@@ -1,4 +1,4 @@
-# IRtoMol
+# IR to Structure
 Scripts of the paper: Automatic structure elucidation from IR spectra
 
 
