@@ -6,7 +6,7 @@ Scripts of the paper: Automatic structure elucidation from IR spectra
   <img src='figure/Graphical Abstract v3.png' width="1000px">
 </p>
 
-The dataset generated in this paper and on which all models were trained is available at: [zenodo.com/....](...)
+The dataset generated in this paper and on which all models were trained is available at: [10.5281/zenodo.7928396](https://doi.org/10.5281/zenodo.7928396)
 
 
 ## Installation guide
