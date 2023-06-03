@@ -54,8 +54,7 @@ max_grad_norm: 0.0
 batch_size: 512
 batch_type: tokens
 normalization: tokens
-dropout: 0.3
-attention_dropout: 0.2
+dropout: 0.1
 label_smoothing: 0.1
 
 param_init: 0.0

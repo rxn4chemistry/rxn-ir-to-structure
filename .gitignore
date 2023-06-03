@@ -6,3 +6,4 @@ examples/train
 examples/ir.p
 data/
 models/
+train_data/
