@@ -7,3 +7,5 @@ examples/ir.p
 data/
 models/
 train_data/
+**/.DS_Store
+.DS_Store
