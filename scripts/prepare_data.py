@@ -176,7 +176,7 @@ def prep_data(
             spectra_list.extend(augmented_spectrum)
 
         for spectrum in spectra_list:
-            if special == "N/A" or special == "No_Split":
+            if special == "N/A" or special == "No_Split" or special == "5_Cross":
                 data.append([tgt_temp, formula_temp + " ".join(spectrum.astype(str))])
             elif special == "Formula":
                 data.append([tgt_temp, formula_temp])
@@ -195,6 +195,28 @@ def split_train_test_val(
     )
 
     return train_set, test_set, val_set
+
+
+def prep_data_pipeline(
+    train_set: pd.DataFrame,
+    test_set: pd.DataFrame,
+    val_set: pd.DataFrame,
+    window_vals: np.ndarray,
+    augmentation: str,
+    special: str,
+    out_save_path: str,
+) -> None:
+    train_data = prep_data(
+        train_set,
+        window_vals,
+        augmentation=augmentation_options[augmentation],
+        special=special,
+    )
+
+    test_data = prep_data(test_set, window_vals, special=special)
+    val_data = prep_data(val_set, window_vals, special=special)
+
+    save_data_split(train_data, test_data, val_data, out_save_path)
 
 
 def save_data(data: np.ndarray, path: str):
@@ -283,7 +305,6 @@ def main(
 
     # Make data directory
     out_save_path = os.path.join(output_path, "data")
-    os.makedirs(out_save_path, exist_ok=True)
 
     window_vals = get_window(window, n_tokens, start)
 
@@ -292,7 +313,24 @@ def main(
         save_data(proc_data, out_save_path)
 
     elif special == "5_Cross":
-        pass
+        kf = KFold(n_splits=5)
+
+        for i, (train_index, test_index) in enumerate(kf.split(data)):
+            train_set, test_set = data.iloc[train_index], data.iloc[test_index]
+            train_set, val_set = train_test_split(train_set, test_size=0.1)
+
+            out_save_path_fold = os.path.join(out_save_path, f"fold_{i}")
+            os.makedirs(out_save_path_fold, exist_ok=True)
+
+            prep_data_pipeline(
+                train_set,
+                test_set,
+                val_set,
+                window_vals,
+                augmentation,
+                special,
+                out_save_path_fold,
+            )
 
     else:
         if split == "85_10_5":
@@ -304,17 +342,17 @@ def main(
                 data, test_size=0.2, val_size=0.1
             )
 
-        train_data = prep_data(
+        os.makedirs(out_save_path, exist_ok=True)
+
+        prep_data_pipeline(
             train_set,
+            test_set,
+            val_set,
             window_vals,
-            augmentation=augmentation_options[augmentation],
-            special=special,
+            augmentation,
+            special,
+            out_save_path,
         )
-
-        test_data = prep_data(test_set, window_vals, special=special)
-        val_data = prep_data(val_set, window_vals, special=special)
-
-        save_data_split(train_data, test_data, val_data, out_save_path)
 
 
 if __name__ == "__main__":
