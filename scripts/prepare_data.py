@@ -8,7 +8,7 @@ import regex as re
 import tqdm
 from scipy import interpolate
 from scipy.ndimage import gaussian_filter1d
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold, train_test_split
 
 
 class AugmentationCallable(Protocol):
@@ -58,18 +58,30 @@ def norm_spectrum(
     return spectrum_norm_int
 
 
-def get_window(option: str, n_tokens: int) -> np.ndarray:
+def get_window(option: str, n_tokens: int, start: str) -> np.ndarray:
+    if start == "450":
+        start_val = 450
+        end_val = 3850
+    elif start == "550":
+        start_val = 550
+        end_val = 3850
+    elif start == "N/A":
+        start_val = 400
+        end_val = 3980
+    else:
+        raise ValueError(f"Unknown option for start: {start}")
+
     if option == "full":
-        return np.linspace(400, 3980, n_tokens)
+        return np.linspace(start_val, end_val, n_tokens)
     elif option == "fingerprint":
-        return np.linspace(400, 2000, n_tokens)
+        return np.linspace(start_val, 2000, n_tokens)
     elif option == "umir":
-        return np.linspace(2000, 3980, n_tokens)
+        return np.linspace(2000, end_val, n_tokens)
     elif option == "merged":
-        resolution = (1600 + 500) / n_tokens
+        resolution = (2000 - start_val + 500) / n_tokens
         return np.concatenate(
             [
-                np.arange(400, 2000, resolution),
+                np.arange(start_val, 2000, resolution),
                 np.arange(2800, 3300 - resolution, resolution),
             ]
         )
@@ -164,7 +176,7 @@ def prep_data(
             spectra_list.extend(augmented_spectrum)
 
         for spectrum in spectra_list:
-            if special == "N/A":
+            if special == "N/A" or special == "No_Split" or special == "5_Cross":
                 data.append([tgt_temp, formula_temp + " ".join(spectrum.astype(str))])
             elif special == "Formula":
                 data.append([tgt_temp, formula_temp])
@@ -175,15 +187,49 @@ def prep_data(
 
 
 def split_train_test_val(
-    data: pd.DataFrame,
+    data: pd.DataFrame, test_size: float = 0.2, val_size: float = 0.1
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    train_set, test_set = train_test_split(data, test_size=0.2)
-    train_set, val_set = train_test_split(train_set, test_size=0.1)
+    train_set, test_set = train_test_split(data, test_size=test_size, random_state=3543)
+    train_set, val_set = train_test_split(
+        train_set, test_size=val_size, random_state=3543
+    )
 
     return train_set, test_set, val_set
 
 
-def save_data(
+def prep_data_pipeline(
+    train_set: pd.DataFrame,
+    test_set: pd.DataFrame,
+    val_set: pd.DataFrame,
+    window_vals: np.ndarray,
+    augmentation: str,
+    special: str,
+    out_save_path: str,
+) -> None:
+    train_data = prep_data(
+        train_set,
+        window_vals,
+        augmentation=augmentation_options[augmentation],
+        special=special,
+    )
+
+    test_data = prep_data(test_set, window_vals, special=special)
+    val_data = prep_data(val_set, window_vals, special=special)
+
+    save_data_split(train_data, test_data, val_data, out_save_path)
+
+
+def save_data(data: np.ndarray, path: str):
+    with open(os.path.join(path, "src-data.txt"), "w") as f:
+        for item in data[:, 1]:
+            f.write(f"{item}\n")
+
+    with open(os.path.join(path, "tgt-data.txt"), "w") as f:
+        for item in data[:, 0]:
+            f.write(f"{item}\n")
+
+
+def save_data_split(
     train_data: np.ndarray, test_data: np.ndarray, val_data: np.ndarray, path: str
 ):
     with open(os.path.join(path, "src-train.txt"), "w") as f:
@@ -239,8 +285,12 @@ augmentation_options: Dict[str, List[AugmentationCallable]] = {
     help="Data augmentation techniques",
 )
 @click.option(
-    "--special", default="N/A", type=click.Choice(["N/A", "Formula", "Spectrum"])
+    "--special",
+    default="N/A",
+    type=click.Choice(["N/A", "Formula", "Spectrum", "No_Split", "5_Cross"]),
 )
+@click.option("--start", default="N/A", type=click.Choice(["N/A", "450", "550"]))
+@click.option("--split", default="85_10_5", type=click.Choice(["85_10_5", "70_20_10"]))
 def main(
     data_path: str,
     output_path: str,
@@ -248,28 +298,61 @@ def main(
     window: str,
     augmentation: str,
     special: str,
+    start: str,
+    split: str,
 ):
     data = load_data(data_path)
 
-    train_set, test_set, val_set = split_train_test_val(data)
-
-    window_vals = get_window(window, n_tokens)
-
-    train_data = prep_data(
-        train_set,
-        window_vals,
-        augmentation=augmentation_options[augmentation],
-        special=special,
-    )
-
-    test_data = prep_data(test_set, window_vals, special=special)
-    val_data = prep_data(val_set, window_vals, special=special)
-
     # Make data directory
     out_save_path = os.path.join(output_path, "data")
-    os.makedirs(out_save_path, exist_ok=True)
 
-    save_data(train_data, test_data, val_data, out_save_path)
+    window_vals = get_window(window, n_tokens, start)
+
+    if special == "No_Split":
+        proc_data = prep_data(data, window_vals, special=special)
+        save_data(proc_data, out_save_path)
+
+    elif special == "5_Cross":
+        kf = KFold(n_splits=5)
+
+        for i, (train_index, test_index) in enumerate(kf.split(data)):
+            train_set, test_set = data.iloc[train_index], data.iloc[test_index]
+            train_set, val_set = train_test_split(train_set, test_size=0.1)
+
+            out_save_path_fold = os.path.join(out_save_path, f"fold_{i}")
+            os.makedirs(out_save_path_fold, exist_ok=True)
+
+            prep_data_pipeline(
+                train_set,
+                test_set,
+                val_set,
+                window_vals,
+                augmentation,
+                special,
+                out_save_path_fold,
+            )
+
+    else:
+        if split == "85_10_5":
+            train_set, test_set, val_set = split_train_test_val(
+                data, test_size=0.1, val_size=0.05
+            )
+        elif split == "70_20_10":
+            train_set, test_set, val_set = split_train_test_val(
+                data, test_size=0.2, val_size=0.1
+            )
+
+        os.makedirs(out_save_path, exist_ok=True)
+
+        prep_data_pipeline(
+            train_set,
+            test_set,
+            val_set,
+            window_vals,
+            augmentation,
+            special,
+            out_save_path,
+        )
 
 
 if __name__ == "__main__":
