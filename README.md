@@ -1,5 +1,5 @@
 # IR to Structure
-Scripts of the paper: Automatic structure elucidation from IR spectra
+Scripts of the paper: [Leveraging Infrared Spectroscopy for Automated Structure Elucidation](https://ibm.biz/ir_to_struc).
 
 
 <p align='center'>
