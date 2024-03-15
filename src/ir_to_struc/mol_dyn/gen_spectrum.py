@@ -1,18 +1,18 @@
 # Adapted from Efrem Braun https://github.com/EfremBraun/calc-ir-spectra-from-lammps, doi.org/10.5281/zenodo.154672
 
-import os
+from pathlib import Path
 
 import numpy as np
 from scipy import fftpack, signal
 
 
-def gen_spectrum(save_dir: str) -> None:
+def gen_spectrum(save_dir: Path) -> None:
     # Inputs
     autocorrelation_option = 1  # 1 to calculate it, 2 to load a pre-calculated one
-    T = 300.0  # K
+    temp = 300.0  # K
     # and at 1% of the trajectory all datapoints have at least 100 non-ish-correlated counts
-    input_dipole_file = os.path.join(save_dir, "dipole.txt")
-    output_autocorrelation_file = os.path.join(save_dir, "autocorr.txt")
+    input_dipole_file = save_dir / "dipole.txt"
+    output_autocorrelation_file = save_dir / "autocorr.txt"
 
     # Constants
     boltz = 1.38064852e-23  # m^2 kg s^-2 K^-1
@@ -92,17 +92,17 @@ def gen_spectrum(save_dir: str) -> None:
 
     # Calculate spectra
     field_description = lineshape_frequencies * (
-        1.0 - np.exp(-reduced_planck * lineshape_frequencies / (boltz * T))
+        1.0 - np.exp(-reduced_planck * lineshape_frequencies / (boltz * temp))
     )
     quantum_correction = lineshape_frequencies / (
-        1.0 - np.exp(-reduced_planck * lineshape_frequencies / (boltz * T))
+        1.0 - np.exp(-reduced_planck * lineshape_frequencies / (boltz * temp))
     )
     # quantum correction per doi.org/10.1021/jp034788u. Other options are possible, see doi.org/10.1063/1.441739 and doi.org/10.1080/00268978500102801.
     spectra = lineshape * field_description
     spectra_qm = spectra * quantum_correction
 
     # Save data
-    save_path = os.path.join(save_dir, "IR-data.csv")
+    save_path = save_dir / "IR-data.csv"
     np.savetxt(
         save_path,
         np.column_stack(

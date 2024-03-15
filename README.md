@@ -11,17 +11,10 @@ The dataset generated in this paper and on which all models were trained is avai
 
 ## Installation guide
 
-Create a conda environment for the scripts:
+Install the package via Poetry:
 
 ```
-conda create -n irtomol python=3.9
-conda activate irtomol
-
-conda install -c conda-forge lammps
-```
-Install all dependencies:
-```
-pip install -r requirements.txt
+poetry install
 ```
 
 EMC can be downloaded from [here](https://sourceforge.net/projects/montecarlo/). Version 9.4.4 was used for all simulations. To setup EMC, add both `bin` and `scripts` to your PATH by running the commands below. Set `EMC_ROOT` environment variable to the path of the EMC folder (e.g. `~/emc/v9.4.4`):
@@ -38,25 +31,25 @@ This section explains how to generate IR spectra using a molecular dynamics pipe
 
 Running the pipeline requires a csv file with two columns: 'Indices' and 'Smiles'. The pipeline will create a separate folder for each row and runs the simulation for a given smiles in this folder. The name of the folder is a vale as specified in the column 'Indices'. This allows you to correlate a SMILES with a simulation folder once all simulations have finished. If the column 'Indices' is not present the script will use the number of the row.
 
-Both the `emc_template.esh` and the `lammps_template.in` can be found in `scripts/mol_dyn/`.
+Both the `emc_template.esh` and the `lammps_template.in` can be found in `templates/`.
 
 ```
-python scripts/run_md_pipeline.py --smiles_csv <smiles_csv> --output_folder <output_folder> --field <force field> --steps <steps> --cores <cores> --emc_template <path to emc_template.esh> --lammps_template <path to lammps_template.in>
+poetry run run_md --smiles_csv <smiles_csv> --output_folder <output_folder> --field <force field> --steps <steps> --cores <cores> --emc_template <path to emc_template.esh> --lammps_template <path to lammps_template.in>
 ```
 To test the script, run the following command with the `example.csv` provided:
 ```
-python scripts/run_md_pipeline.py --smiles_csv examples/smiles.csv --output_folder examples/out --steps 50000 --emc_template scripts/mol_dyn/emc_template.esh --lammps_template scripts/mol_dyn/lammps_template.in
+poetry run run_md --smiles_csv examples/smiles.csv --output_folder examples/out --steps 50000 --emc_template templates/emc_template.esh --lammps_template templates/lammps_template.in
 ```
 Note: For reliable spectra, do not run production runs with 50,000 steps; 500,000 is more appropriate.
 
 ### Gathering the data
 
-Once the simulation pipeline has finished, you can gather the data using the `gather_ir_data.py` script. Provide the script with the `simulation_folder`, the `smiles_path` (path to the smiles csv used for the simulations) and where to save the data (`output_folder`, saved as a pickled dataframe ready to train with).
+Once the simulation pipeline has finished, you can gather the data using the `gather_data` script. Provide the script with the `simulation_folder`, the `smiles_path` (path to the smiles csv used for the simulations) and where to save the data (`output_folder`, saved as a pickled dataframe ready to train with).
 
 For the example run as follows:
 
 ```
-python scripts/gather_ir_data.py --simulation_folder examples/out --smiles_path examples/smiles.csv --output_folder examples/
+poetry run gather_data --simulation_folder examples/out --smiles_path examples/smiles.csv --output_folder examples/
 ```
 
 
@@ -65,7 +58,7 @@ This section covers preparing the data for the model, training the model, runnin
 
 ### Preparing the data
 
-The `prepare_data.py` script creates the input data from the simulated data. It requires as input a pickled dataframe with the columns: 'formula', 'spectra' and 'smiles'. The spectra is expected as a 1D Numpy array with a range from 400-3982cm<sup>-1</sup> and a resolution of 2cm<sup>-1</sup> (i.e. 1792 values). 
+The `prepare_data` script creates the input data from the simulated data. It requires as input a pickled dataframe with the columns: 'formula', 'spectra' and 'smiles'. The spectra is expected as a 1D Numpy array with a range from 400-3982cm<sup>-1</sup> and a resolution of 2cm<sup>-1</sup> (i.e. 1792 values). 
 
 Parameters of the script:
 ```
@@ -82,22 +75,22 @@ and shift_horizontal)
 Running the script to generate training data from the example:
 
 ```
-python scripts/prepare_data.py --data_path examples/ir.pkl --output_path examples/train
+poetry run prepare_data --data_path examples/ir.pkl --output_path examples/train
 ```
 
 ### Training
 
-Run a training of the model using the `run_training.py` script. This script requires a directory prepared by the `prepare_data.py` with a subfolder called `data` which contains the training, validation and test data. Another requirement is a path to a OpenNMT configuration template. The template with which all trainings were performed in the template is provided in `scripts/transformer_template.yaml`.
+Run a training of the model using the `run_training` script. This script requires a directory prepared by `prepare_data` with a subfolder called `data` which contains the training, validation and test data. Another requirement is a path to a OpenNMT configuration template. The template with which all trainings were performed in the template is provided in `templates/transformer_template.yaml`.
 
 For the example try:
 ```
-python scripts/run_training.py --template_path scripts/transformer_template.yaml --data_folder --data_folder examples/train
+poetry run run_training --template_path templates/transformer_template.yaml --data_folder examples/train
 ```
 Note: The template expects a GPU to be present and to run a real training much more data is required.
 
 For testing purposes, training a model for only few steps with a tiny model on CPU only:
 ```
-python scripts/run_training.py --template_path scripts/transformer_template_tiny_cpu.yaml --data_folder --data_folder examples/train
+poetry run run_training --template_path templates/transformer_template_tiny_cpu.yaml --data_folder examples/train
 ```
 
 ### Inference
@@ -118,12 +111,12 @@ onmt_translate -model examples/train/model_step_5.pt -src examples/train/data/sr
 Scoring can be done via the `score.py` script:
 
 ```
-python scripts/score.py --tgt_path <path to tgt file> --inference_path <out file from inference> 
+poetry run score --tgt_path <path to tgt file> --inference_path <out file from inference> 
 ```
 
 For the example above:
 ```
-python scripts/score.py --tgt_path examples/train/data/tgt-val.txt --inference_path examples/train/pred-val.txt
+poetry run score --tgt_path examples/train/data/tgt-val.txt --inference_path examples/train/pred-val.txt
 ```
 
 Use `--n_beams` if the beam size is changed from 10 during inference.

@@ -1,4 +1,5 @@
 from ctypes import ArgumentError
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import click
@@ -44,15 +45,15 @@ def strip(data: List[str]) -> List[str]:
 
 
 def load_data(
-    inference_path: str, tgt_path: str, n_beams: int = 10
+    inference_path: Path, tgt_path: Path, n_beams: int = 10
 ) -> Tuple[List[List[str]], List[str]]:
     # Load tgt
-    with open(tgt_path, "r") as f:
+    with tgt_path.open("r") as f:
         tgt = f.readlines()
     tgt = strip(tgt)
 
     # Load preds
-    with open(inference_path, "r") as f:
+    with inference_path.open("r") as f:
         preds = f.readlines()
     preds_stripped = strip(preds)
     pred_batched = [
@@ -148,10 +149,10 @@ def score(preds: List[List[str]], tgt: List[str]) -> pd.DataFrame:
 
 
 @click.command()
-@click.option("--tgt_path", required=True, help="Path to the tgt file")
-@click.option("--inference_path", required=True, help="Path to the inference file")
+@click.option("--tgt_path", type=Path, required=True, help="Path to the tgt file")
+@click.option("--inference_path", type=Path, required=True, help="Path to the inference file")
 @click.option("--n_beams", default=10, help="Number of beams")
-def main(inference_path: str, tgt_path: str, n_beams: int = 10) -> None:
+def main(inference_path: Path, tgt_path: Path, n_beams: int = 10) -> None:
     RDLogger.DisableLog("rdApp.*")
 
     preds, tgt = load_data(

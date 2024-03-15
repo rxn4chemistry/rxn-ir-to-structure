@@ -1,52 +1,53 @@
 import logging
-import os
+from pathlib import Path
 
 import click
 import pandas as pd
 import tqdm
-from mol_dyn.pipeline import pipeline
-from mol_dyn.utils import load_smiles_csv
+
+from ir_to_struc.mol_dyn.pipeline import pipeline
+from ir_to_struc.mol_dyn.utils import load_smiles_csv
 
 
 @click.command()
-@click.option("--smiles_csv", required=True, help="Smiles csv")
-@click.option("--output_folder", required=True, help="Output folder")
+@click.option("--smiles_csv", type=Path, required=True, help="Smiles csv")
+@click.option("--output_folder", type=Path, required=True, help="Output folder")
 @click.option("--field", type=str, default="pcff", help="Force field")
 @click.option("--steps", type=int, default=500000, help="Steps")
 @click.option("--cores", type=int, default=8, help="Cores")
 @click.option(
     "--emc_template",
-    type=str,
+    type=Path,
     default="mol_dyn/emc_template.esh",
     help="Path to the emc template file in the mol_dyn folder",
 )
 @click.option(
     "--lammps_template",
-    type=str,
+    type=Path,
     default="mol_dyn/lammps_template.in",
     help="Path to the lammps `template file in the mol_dyn folder",
 )
 def main(
-    smiles_csv: str,
-    output_folder: str,
+    smiles_csv: Path,
+    output_folder: Path,
     field: str = "pcff",
     steps: int = 500000,
     cores: int = 8,
-    emc_template: str = "mol_dyn/emc_template.esh",
-    lammps_template: str = "mol_dyn/lammps_template.in",
+    emc_template: Path = Path("mol_dyn/emc_template.esh"),
+    lammps_template: Path = Path("mol_dyn/lammps_template.in"),
 ):
     logging.basicConfig(level="INFO")
 
     smiles_data = load_smiles_csv(smiles_csv)
-    os.makedirs(output_folder, exist_ok=True)
+    output_folder.mkdir(parents=True, exist_ok=True)
 
     status_dict = dict()
     for i in tqdm.tqdm(range(len(smiles_data))):
         # index corresponds to the indice of the row in the smiles csv. The scripts creates a folder for each index, making it easy to correlate the smiles to the simulation folder
         index, smiles = smiles_data.iloc[i]["Indices"], smiles_data.iloc[i]["Smiles"]
 
-        folder_path = os.path.join(output_folder, str(index))
-        os.makedirs(folder_path, exist_ok=True)
+        folder_path = output_folder / str(index)
+        folder_path.mkdir(parents=True, exist_ok=True)
 
         status = pipeline(
             folder_path, steps, cores, field, smiles, emc_template, lammps_template
@@ -84,7 +85,7 @@ def main(
             status_df["gen_spectrum"].sum() / len(status_df) * 100,
         )
     )
-    status_df.to_csv(os.path.join(output_folder, "status_lammps.csv"))
+    status_df.to_csv(output_folder / "status_lammps.csv")
 
 
 if __name__ == "__main__":

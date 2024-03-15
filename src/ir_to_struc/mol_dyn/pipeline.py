@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 import subprocess
+from pathlib import Path
 from sys import platform
 from typing import Dict
 
@@ -15,27 +16,27 @@ logger.addHandler(logging.NullHandler())
 
 
 def gen_emc_file(
-    atom_count: int, field: str, smiles: str, save_dir: str, emc_template: str
+    atom_count: int, field: str, smiles: str, save_dir: Path, emc_template: Path
 ) -> bool:
-    if not os.path.isdir(save_dir):
+    if not save_dir.is_dir():
         raise ValueError(f"{save_dir} not a directory.")
 
-    with open(emc_template, "r") as f:
+    with emc_template.open("r") as f:
         file = f.read()
 
     formatted_file = file.format(
         atom_count=atom_count, field=field, path=save_dir, smiles=smiles
     )
-    save_path = os.path.join(save_dir, "setup.esh")
-    with open(save_path, "w") as f:
+    save_path = save_dir / "setup.esh"
+    with save_path.open("w") as f:
         f.write(formatted_file)
 
     return True
 
 
-def run_emc(run_dir: str) -> bool:
-    cwd = os.getcwd()
-    os.chdir(run_dir)
+def run_emc(run_dir: Path) -> bool:
+    cwd = run_dir.cwd()
+    os.chdir(str(run_dir))
 
     # Determine the correct EMC command
     if platform == "linux" or platform == "linux2":
@@ -45,29 +46,29 @@ def run_emc(run_dir: str) -> bool:
     elif platform == "win32":
         emc_command = "emc_win32.exe"
 
-    with open("emc_setup.log", "w") as out:
+    with Path("emc_setup.log").open("w") as out:
         subprocess.call(["emc_setup.pl", "setup.esh"], stdout=out, stderr=out)
 
-    with open("emc_build.log", "w") as out:
+    with Path("emc_build.log").open("w") as out:
         subprocess.call([emc_command, "build.emc"], stdout=out, stderr=out)
 
-    os.chdir(cwd)
+    os.chdir(str(cwd))
 
     return True
 
 
 def gen_lammps_file(
-    params_path: str, data_path: str, steps: int, save_dir: str, lammps_template: str
+    params_path: Path, data_path: Path, steps: int, save_dir: Path, lammps_template: Path
 ) -> bool:
-    if not os.path.isdir(save_dir):
+    if not save_dir.is_dir():
         raise ValueError(f"{save_dir} not a directory.")
 
-    with open(lammps_template, "r") as f:
+    with lammps_template.open("r") as f:
         file = f.read()
 
     formatted_file = file.format(params=params_path, data=data_path, steps=steps)
-    save_path = os.path.join(save_dir, "lammps.in")
-    with open(save_path, "w") as f:
+    save_path = save_dir / "lammps.in"
+    with save_path.open("w") as f:
         f.write(formatted_file)
 
     return True
@@ -79,11 +80,11 @@ def _replace_setup_line(line: str, box_dim: float) -> str:
     return " ".join(line_split)
 
 
-def set_box(setup_data_path: str, box_dim: float = 15.0) -> bool:
-    if not os.path.isfile(setup_data_path):
-        raise ValueError(f"{setup_data_path} not a directory.")
+def set_box(setup_data_path: Path, box_dim: float = 15.0) -> bool:
+    if not setup_data_path.is_file():
+        raise ValueError(f"{setup_data_path} is not a file.")
 
-    with open(setup_data_path, "r") as f:
+    with setup_data_path.open("r") as f:
         setup_data = f.readlines()
 
     for i in range(len(setup_data)):
@@ -93,17 +94,17 @@ def set_box(setup_data_path: str, box_dim: float = 15.0) -> bool:
             setup_data[i + 2] = _replace_setup_line(setup_data[i + 2], box_dim)
             break
 
-    with open(setup_data_path, "w") as f:
+    with setup_data_path.open("w") as f:
         f.writelines(setup_data)
 
     return True
 
 
-def run_lammps(run_dir: str, cores: int) -> bool:
-    cwd = os.getcwd()
-    os.chdir(run_dir)
+def run_lammps(run_dir: Path, cores: int) -> bool:
+    cwd = Path.cwd()
+    os.chdir(str(run_dir))
 
-    with open("lammps_out.log", "w") as out:
+    with Path("lammps_out.log").open("w") as out:
         if cores == 1:
             subprocess.call(
                 ["lmp", "-in", "lammps.in"],
@@ -122,13 +123,13 @@ def run_lammps(run_dir: str, cores: int) -> bool:
 
 
 def pipeline(
-    direc: str,
+    direc: Path,
     steps: int,
     cores: int,
     field: str,
     smiles: str,
-    emc_template: str,
-    lammps_template: str,
+    emc_template: Path,
+    lammps_template: Path,
 ) -> Dict[str, bool]:
     status = {
         "gen_emc_file": False,
@@ -151,7 +152,7 @@ def pipeline(
 
     try:
         gen_emc_file(atom_count, field, smiles, direc, emc_template)
-        if "setup.esh" not in os.listdir(direc):
+        if "setup.esh" not in os.listdir(str(direc)):
             raise KeyError("gen_emc Failed, setup.esh not found")
 
         status["gen_emc_file"] = True
@@ -160,9 +161,7 @@ def pipeline(
 
     try:
         run_emc(direc)
-        if "setup.data" not in os.listdir(direc) or "setup.params" not in os.listdir(
-            direc
-        ):
+        if "setup.data" not in os.listdir(str(direc)) or "setup.params" not in os.listdir(str(direc)):
             raise KeyError("run_emc Failed, setup.data or/and setup.params not found")
 
         status["run_emc"] = True
@@ -170,7 +169,7 @@ def pipeline(
         return status
 
     try:
-        setup_data_path = os.path.join(direc, "setup.data")
+        setup_data_path = direc / "setup.data"
         set_box(setup_data_path)
         status["set_box"] = True
     except IOError:
@@ -178,8 +177,8 @@ def pipeline(
 
     # Run lammps
     try:
-        gen_lammps_file("setup.params", "setup.data", steps, direc, lammps_template)
-        if "lammps.in" not in os.listdir(direc):
+        gen_lammps_file(Path("setup.params"), Path("setup.data"), steps, direc, lammps_template)
+        if "lammps.in" not in os.listdir(str(direc)):
             raise KeyError("gen_lammps_file Failed, lammps.in not found")
 
         status["gen_lammps_file"] = True
@@ -189,7 +188,7 @@ def pipeline(
 
     try:
         run_lammps(direc, cores)
-        if "dipole.txt" not in os.listdir(direc):
+        if "dipole.txt" not in os.listdir(str(direc)):
             raise KeyError("run_lammps Failed, dipole.txt not found")
 
         status["run_lammps"] = True
