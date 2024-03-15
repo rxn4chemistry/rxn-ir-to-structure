@@ -1,12 +1,16 @@
-from typing import Union as U, Tuple as T
+"""Adapted from https://github.com/BioSpecNorway/EMSA."""
+
+
+# mypy: ignore-errors
+from typing import Optional, Tuple, Union
 
 import numpy as np
 
 
 def emsc(spectra: np.ndarray, wavenumbers: np.ndarray, order: int = 2,
-         reference: np.ndarray = None,
-         constituents: np.ndarray = None,
-         return_coefs: bool = False) -> U[np.ndarray, T[np.ndarray, np.ndarray]]:
+         reference: Optional[np.ndarray] = None,
+         constituents: Optional[np.ndarray] = None,
+         return_coefs: Optional[bool] = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """
     Preprocess all spectra with EMSC
     :param spectra: ndarray of shape [n_samples, n_channels]
@@ -49,12 +53,12 @@ def emsc(spectra: np.ndarray, wavenumbers: np.ndarray, order: int = 2,
     else:
         columns = (reference, constituents.T, polynomial_columns)
 
-    X = np.concatenate(columns, axis=1)
-    A = np.dot(np.linalg.pinv(np.dot(X.T, X)), X.T)
+    x_values = np.concatenate(columns, axis=1)
+    a_values = np.dot(np.linalg.pinv(np.dot(x_values.T, x_values)), x_values.T)
 
     spectra_columns = spectra.T
-    coefs = np.dot(A, spectra_columns)
-    residues = spectra_columns - np.dot(X, coefs)
+    coefs = np.dot(a_values, spectra_columns)
+    residues = spectra_columns - np.dot(x_values, coefs)
 
     preprocessed_spectra = (reference + residues/coefs[0]).T
 

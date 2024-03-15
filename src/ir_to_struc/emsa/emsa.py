@@ -1,3 +1,6 @@
+"""Adapted from https://github.com/BioSpecNorway/EMSA."""
+
+# mypy: ignore-errors
 import numpy as np
 
 
@@ -54,10 +57,10 @@ class EMSA:
         classes = np.unique(labels, axis=0)
 
         if len(labels.shape) == 2:
-            grouped = [np.where(np.all(labels == l, axis=1))[0]
-                       for l in classes]
+            grouped = [np.where(np.all(labels == class_label, axis=1))[0]
+                       for class_label in classes]
         else:
-            grouped = [np.where(labels == l)[0] for l in classes]
+            grouped = [np.where(labels == class_label)[0] for class_label in classes]
         iters_cnt = max([len(g) for g in grouped])
 
         indexes = []

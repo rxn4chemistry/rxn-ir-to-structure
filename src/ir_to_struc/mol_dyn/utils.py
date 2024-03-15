@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import pandas as pd
 
 
-def load_smiles_csv(path: str) -> pd.DataFrame:
+def load_smiles_csv(path: Path) -> pd.DataFrame:
     smiles_csv = pd.read_csv(path, index_col=0)
 
     if "Smiles" not in smiles_csv.columns:

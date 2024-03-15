@@ -1,28 +1,28 @@
-import os
-from typing import Dict, List, Optional, Protocol, Tuple
+from functools import partial
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 import click
 import numpy as np
 import pandas as pd
 import regex as re
 import tqdm
-import math
+from rdkit import Chem
+from rdkit.Chem.Scaffolds import MurckoScaffold
 from scipy import interpolate
 from scipy.ndimage import gaussian_filter1d
 from sklearn.model_selection import KFold, train_test_split
-from functools import partial
-from rdkit.Chem.Scaffolds import MurckoScaffold
-from rdkit import Chem
 
-from emsa.emsa import EMSA
-from emsa.emsc import emsc
+from ir_to_struc.emsa.emsa import EMSA
+from ir_to_struc.emsa.emsc import emsc
+
 
 class AugmentationCallable(Protocol):
     def __call__(self, x: np.ndarray, y: np.ndarray, /) -> List[np.ndarray]:
         ...
 
 
-def load_data(data_path: str) -> pd.DataFrame:
+def load_data(data_path: Path) -> pd.DataFrame:
     return pd.read_pickle(data_path)
 
 
@@ -34,7 +34,7 @@ def split_smiles(smile: str) -> str:
 
     if smile != "".join(tokens):
         raise ValueError(
-            "Tokenised smiles does not match original: {} {}".format(tokens, smile)
+            f"Tokenised smiles does not match original: {tokens} {smile}"
         )
 
     return " ".join(tokens)
@@ -47,9 +47,7 @@ def split_formula(formula: str) -> str:
 
     if "".join(formula_split) != formula:
         raise ValueError(
-            "Tokenised smiles does not match original: {} {}".format(
-                formula_split, formula
-            )
+            f"Tokenised smiles does not match original: {formula_split} {formula}"
         )
     return " ".join(formula_split) + " | "
 
@@ -243,7 +241,7 @@ def split_train_test_val_random(
     return train_set, test_set, val_set
 
 
-def generate_scaffold(smiles, include_chirality=False):
+def generate_scaffold(smiles, include_chirality=False) -> Any:
     """return scaffold string of target molecule"""
     mol = Chem.MolFromSmiles(smiles)
     scaffold = MurckoScaffold.MurckoScaffoldSmiles(mol=mol, includeChirality=include_chirality)
@@ -255,7 +253,7 @@ def split_train_test_val_scaffold(data: pd.DataFrame, test_size: float = 0.2, va
 
     rng = np.random.RandomState(3543)
 
-    scaffolds = dict()
+    scaffolds: Dict[str, Any] = dict()
     for ind, smiles in enumerate(smiles_list):
         scaffold = generate_scaffold(smiles, True)
         if scaffold not in scaffolds:
@@ -267,9 +265,9 @@ def split_train_test_val_scaffold(data: pd.DataFrame, test_size: float = 0.2, va
     n_total_test = int(np.floor(test_size * len(smiles_list)))
     n_total_val = int(np.floor(val_size * len(smiles_list)))
 
-    val_index = []
-    train_index = []
-    test_index = []
+    val_index: List[Any] = []
+    train_index: List[Any] = []
+    test_index: List[Any] = []
 
     for scaffold_set in scaffolds.values():
         if len(val_index) + len(scaffold_set) <= n_total_val:
@@ -289,7 +287,7 @@ def prep_data_pipeline(
     window_vals: np.ndarray,
     augmentation: str,
     special: str,
-    out_save_path: str,
+    out_save_path: Path,
     mixtures: bool
 ) -> None:
     train_data = prep_data(
@@ -310,24 +308,24 @@ def prep_data_pipeline(
     save_data_split(val_data, 'val', out_save_path)
 
 
-def save_data(data: np.ndarray, path: str):
-    with open(os.path.join(path, "src-data.txt"), "w") as f:
+def save_data(data: np.ndarray, path: Path):
+    with (path / "src-data.txt").open("w") as f:
         for item in data[:, 1]:
             f.write(f"{item}\n")
 
-    with open(os.path.join(path, "tgt-data.txt"), "w") as f:
+    with (path / "tgt-data.txt").open("w") as f:
         for item in data[:, 0]:
             f.write(f"{item}\n")
 
 
 def save_data_split(
-    data: np.ndarray, split: str, path: str
+    data: np.ndarray, split: str, path: Path
 ):
-    with open(os.path.join(path, f"src-{split}.txt"), "w") as f:
+    with (path / f"src-{split}.txt").open("w") as f:
         for item in data[:, 1]:
             f.write(f"{item}\n")
 
-    with open(os.path.join(path, f"tgt-{split}.txt"), "w") as f:
+    with (path / f"tgt-{split}.txt").open("w") as f:
         for item in data[:, 0]:
             f.write(f"{item}\n")
 
@@ -343,8 +341,8 @@ augmentation_options: Dict[str, List[AugmentationCallable]] = {
 
 
 @click.command()
-@click.option("--data_path", required=True, help="Data path")
-@click.option("--output_path", required=True, help="Output folder")
+@click.option("--data_path", type=Path, required=True, help="Data path")
+@click.option("--output_path", type=Path, required=True, help="Output folder")
 @click.option(
     "--n_tokens", default=400, help="Number of tokens to represent the IR spectrum with"
 )
@@ -370,8 +368,8 @@ augmentation_options: Dict[str, List[AugmentationCallable]] = {
 @click.option("--mixtures", is_flag=True)
 
 def main(
-    data_path: str,
-    output_path: str,
+    data_path: Path,
+    output_path: Path,
     n_tokens: int,
     window: str,
     augmentation: str,
@@ -414,8 +412,8 @@ def main(
             train_set, test_set = data.iloc[train_index], data.iloc[test_index]
             train_set, val_set = train_test_split(train_set, test_size=0.1)
 
-            out_save_path_fold = os.path.join(output_path, f"fold_{i}", "data")
-            os.makedirs(out_save_path_fold, exist_ok=True)
+            out_save_path_fold = output_path / f"fold_{i}" / "data"
+            out_save_path_fold.mkdir(parents=True, exist_ok=True)
 
             prep_data_pipeline(
                 train_set,
@@ -432,8 +430,8 @@ def main(
                 data, test_size=0.2, val_size=0.1
             )
         # Make data directory
-        out_save_path = os.path.join(output_path, "data")
-        os.makedirs(out_save_path, exist_ok=True)
+        out_save_path = output_path / "data"
+        out_save_path.mkdir(parents=True, exist_ok=True)
         
         prep_data_pipeline(
             train_set,
@@ -456,8 +454,8 @@ def main(
                 data, test_size=0.2, val_size=0.1
             )
         # Make data directory
-        out_save_path = os.path.join(output_path, "data")
-        os.makedirs(out_save_path, exist_ok=True)
+        out_save_path = output_path / "data"
+        out_save_path.mkdir(parents=True, exist_ok=True)
 
         prep_data_pipeline(
             train_set,
