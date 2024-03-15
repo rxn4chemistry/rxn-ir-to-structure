@@ -6,10 +6,16 @@ import numpy as np
 import pandas as pd
 import regex as re
 import tqdm
+import math
 from scipy import interpolate
 from scipy.ndimage import gaussian_filter1d
 from sklearn.model_selection import KFold, train_test_split
+from functools import partial
+from rdkit.Chem.Scaffolds import MurckoScaffold
+from rdkit import Chem
 
+from emsa.emsa import EMSA
+from emsa.emsc import emsc
 
 class AugmentationCallable(Protocol):
     def __call__(self, x: np.ndarray, y: np.ndarray, /) -> List[np.ndarray]:
@@ -65,12 +71,15 @@ def get_window(option: str, n_tokens: int, start: str) -> np.ndarray:
     elif start == "550":
         start_val = 550
         end_val = 3850
+    elif start == "800":
+        start_val = 800
+        end_val = 3980
     elif start == "N/A":
         start_val = 400
         end_val = 3980
     else:
         raise ValueError(f"Unknown option for start: {start}")
-
+    
     if option == "full":
         return np.linspace(start_val, end_val, n_tokens)
     elif option == "fingerprint":
@@ -82,6 +91,14 @@ def get_window(option: str, n_tokens: int, start: str) -> np.ndarray:
         return np.concatenate(
             [
                 np.arange(start_val, 2000, resolution),
+                np.arange(2800, 3300 - resolution, resolution),
+            ]
+        )
+    elif option == "remove_1800":
+        resolution = (1800 - start_val + 500) / n_tokens
+        return np.concatenate(
+            [
+                np.arange(start_val, 1800, resolution),
                 np.arange(2800, 3300 - resolution, resolution),
             ]
         )
@@ -151,22 +168,51 @@ def augment_noise(
 
     return noised_spectra_vertical
 
+def augment_emsa(spectrum: np.ndarray, new_x: np.ndarray, emsa: EMSA) -> List[np.ndarray]:
+
+    augmented_spectrum = emsa.batch_transform(np.array([spectrum]))[0]
+    intp_spectrum = interpolate_spectrum(augmented_spectrum, new_x)[0]
+    return [intp_spectrum]
+
+def augment__offset(spectrum: np.ndarray, new_x: np.ndarray) -> List[np.ndarray]:
+    std = np.std(spectrum)
+    offset = std * np.random.normal(loc=0.2, scale=0.05)
+    offset_spectrum = spectrum + offset
+    offset_spectrum = offset_spectrum + min(offset_spectrum)
+    intp_spectrum = interpolate_spectrum(offset_spectrum, new_x)[0]
+    return [intp_spectrum]
+
+def augment_multiplication(spectrum: np.ndarray, new_x: np.ndarray, std: np.ndarray) -> List[np.ndarray]:
+    std_spec = std + 1 + np.random.normal(loc=std.mean(), scale=0.2, size=len(std))
+    augmented_spectrum = spectrum * std_spec
+    intp_spectrum = interpolate_spectrum(augmented_spectrum, new_x)[0]
+    return [intp_spectrum]
+
 
 def prep_data(
     data_df: pd.DataFrame,
     new_x: np.ndarray,
     augmentation: Optional[List[AugmentationCallable]] = None,
     special: str = "N/A",
+    mixtures: bool = False
 ) -> np.ndarray:
     if augmentation is None:
         augmentation = [interpolate_spectrum]
 
-    spectra, formula, tgt = data_df["spectra"], data_df["formula"], data_df["smiles"]
+    if mixtures:
+        spectra, formula1, formula2, tgt = data_df["spectra"], data_df["formula_1"], data_df["formula_2"], data_df["smiles"]
+    else:
+        spectra, formula, tgt = data_df["spectra"], data_df["formula"], data_df["smiles"]
 
     data = list()
 
     for i, spectrum_orig in enumerate(tqdm.tqdm(spectra)):
-        formula_temp = split_formula(formula.iloc[i])
+        if mixtures:
+            formula_temp = split_formula(formula1.iloc[i])
+            formula_temp += split_formula(formula2.iloc[i])
+        else:
+            formula_temp = split_formula(formula.iloc[i])
+
         tgt_temp = split_smiles(tgt.iloc[i])
 
         spectra_list = list()
@@ -176,7 +222,7 @@ def prep_data(
             spectra_list.extend(augmented_spectrum)
 
         for spectrum in spectra_list:
-            if special == "N/A" or special == "No_Split" or special == "5_Cross":
+            if special == "N/A" or special == "No_Split" or special == "5_Cross" or special == 'Scaffold':
                 data.append([tgt_temp, formula_temp + " ".join(spectrum.astype(str))])
             elif special == "Formula":
                 data.append([tgt_temp, formula_temp])
@@ -186,7 +232,7 @@ def prep_data(
     return np.array(data)
 
 
-def split_train_test_val(
+def split_train_test_val_random(
     data: pd.DataFrame, test_size: float = 0.2, val_size: float = 0.1
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     train_set, test_set = train_test_split(data, test_size=test_size, random_state=3543)
@@ -197,6 +243,45 @@ def split_train_test_val(
     return train_set, test_set, val_set
 
 
+def generate_scaffold(smiles, include_chirality=False):
+    """return scaffold string of target molecule"""
+    mol = Chem.MolFromSmiles(smiles)
+    scaffold = MurckoScaffold.MurckoScaffoldSmiles(mol=mol, includeChirality=include_chirality)
+    return scaffold
+
+
+def split_train_test_val_scaffold(data: pd.DataFrame, test_size: float = 0.2, val_size: float = 0.1) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    smiles_list = data.smiles
+
+    rng = np.random.RandomState(3543)
+
+    scaffolds = dict()
+    for ind, smiles in enumerate(smiles_list):
+        scaffold = generate_scaffold(smiles, True)
+        if scaffold not in scaffolds:
+            scaffolds[scaffold] = list()
+        scaffolds[scaffold].append(ind)
+
+    rng.shuffle(list(scaffolds.values()))
+
+    n_total_test = int(np.floor(test_size * len(smiles_list)))
+    n_total_val = int(np.floor(val_size * len(smiles_list)))
+
+    val_index = []
+    train_index = []
+    test_index = []
+
+    for scaffold_set in scaffolds.values():
+        if len(val_index) + len(scaffold_set) <= n_total_val:
+                val_index.extend(scaffold_set)
+        elif len(test_index) + len(scaffold_set) <= n_total_test:
+            test_index.extend(scaffold_set)
+        else:
+            train_index.extend(scaffold_set)
+
+    return data.iloc[train_index], data.iloc[test_index], data.iloc[val_index]
+
+
 def prep_data_pipeline(
     train_set: pd.DataFrame,
     test_set: pd.DataFrame,
@@ -205,18 +290,24 @@ def prep_data_pipeline(
     augmentation: str,
     special: str,
     out_save_path: str,
+    mixtures: bool
 ) -> None:
     train_data = prep_data(
         train_set,
         window_vals,
         augmentation=augmentation_options[augmentation],
         special=special,
+        mixtures = mixtures
     )
+    
+    save_data_split(train_data, 'train', out_save_path)
+    del(train_data)
 
-    test_data = prep_data(test_set, window_vals, special=special)
-    val_data = prep_data(val_set, window_vals, special=special)
+    test_data = prep_data(test_set, window_vals, special=special, mixtures = mixtures)
+    save_data_split(test_data, 'test', out_save_path)
 
-    save_data_split(train_data, test_data, val_data, out_save_path)
+    val_data = prep_data(val_set, window_vals, special=special, mixtures = mixtures)
+    save_data_split(val_data, 'val', out_save_path)
 
 
 def save_data(data: np.ndarray, path: str):
@@ -230,30 +321,14 @@ def save_data(data: np.ndarray, path: str):
 
 
 def save_data_split(
-    train_data: np.ndarray, test_data: np.ndarray, val_data: np.ndarray, path: str
+    data: np.ndarray, split: str, path: str
 ):
-    with open(os.path.join(path, "src-train.txt"), "w") as f:
-        for item in train_data[:, 1]:
+    with open(os.path.join(path, f"src-{split}.txt"), "w") as f:
+        for item in data[:, 1]:
             f.write(f"{item}\n")
 
-    with open(os.path.join(path, "tgt-train.txt"), "w") as f:
-        for item in train_data[:, 0]:
-            f.write(f"{item}\n")
-
-    with open(os.path.join(path, "src-test.txt"), "w") as f:
-        for item in test_data[:, 1]:
-            f.write(f"{item}\n")
-
-    with open(os.path.join(path, "tgt-test.txt"), "w") as f:
-        for item in test_data[:, 0]:
-            f.write(f"{item}\n")
-
-    with open(os.path.join(path, "src-val.txt"), "w") as f:
-        for item in val_data[:, 1]:
-            f.write(f"{item}\n")
-
-    with open(os.path.join(path, "tgt-val.txt"), "w") as f:
-        for item in val_data[:, 0]:
+    with open(os.path.join(path, f"tgt-{split}.txt"), "w") as f:
+        for item in data[:, 0]:
             f.write(f"{item}\n")
 
 
@@ -262,6 +337,7 @@ augmentation_options: Dict[str, List[AugmentationCallable]] = {
     "smooth": [interpolate_spectrum, augment_smooth],
     "shift_horizontal": [interpolate_spectrum, augment_shift_horizontal],
     "noise_vertical": [interpolate_spectrum, augment_noise],
+    "offset": [interpolate_spectrum, augment__offset],
     "all": [interpolate_spectrum, augment_smooth, augment_shift_horizontal],
 }
 
@@ -275,22 +351,24 @@ augmentation_options: Dict[str, List[AugmentationCallable]] = {
 @click.option(
     "--window",
     default="full",
-    type=click.Choice(["full", "fingerprint", "umir", "merged"]),
+    type=click.Choice(["full", "fingerprint", "umir", "merged", "remove_1800"]),
     help="What section of the IR spectrum to use",
 )
 @click.option(
     "--augmentation",
     default="N/A",
-    type=click.Choice(["N/A", "smooth", "shift_horizontal", "noise_vertical", "all"]),
+    type=click.Choice(["N/A", "smooth", "shift_horizontal", "noise_vertical", "emsa", "offset", "multiplication", "all"]),
     help="Data augmentation techniques",
 )
 @click.option(
     "--special",
     default="N/A",
-    type=click.Choice(["N/A", "Formula", "Spectrum", "No_Split", "5_Cross"]),
+    type=click.Choice(["N/A", "Formula", "Spectrum", "No_Split", "5_Cross", "Scaffold"]),
 )
-@click.option("--start", default="N/A", type=click.Choice(["N/A", "450", "550"]))
+@click.option("--start", default="N/A", type=click.Choice(["N/A", "450", "550", "800"]))
 @click.option("--split", default="85_10_5", type=click.Choice(["85_10_5", "70_20_10"]))
+@click.option("--mixtures", is_flag=True)
+
 def main(
     data_path: str,
     output_path: str,
@@ -300,17 +378,34 @@ def main(
     special: str,
     start: str,
     split: str,
+    mixtures: bool
 ):
     data = load_data(data_path)
 
-    # Make data directory
-    out_save_path = os.path.join(output_path, "data")
+    # Deal with EMSA setup
+    if augmentation == 'emsa':
+        spectra = np.vstack(data.spectra)
+        wavenumbers = np.arange(400, 3982, 2)
+
+        reference = spectra.mean(axis=0)
+        _, coefs_ = emsc(
+            spectra, wavenumbers,
+            order=2, reference=reference,
+            return_coefs=True)
+        coefs_std = coefs_.std(axis=0)
+
+        emsa = EMSA(coefs_std, wavenumbers, reference, order=2)
+        augmentation_options['emsa'] = [interpolate_spectrum, partial(augment_emsa, emsa=emsa)]
+    elif augmentation == 'multiplication':
+        spectra = np.vstack(data.spectra)
+        std = np.std(spectra, 0)
+        augmentation_options['multiplication'] = [interpolate_spectrum, partial(augment_multiplication, std=std)]
 
     window_vals = get_window(window, n_tokens, start)
 
     if special == "No_Split":
-        proc_data = prep_data(data, window_vals, special=special)
-        save_data(proc_data, out_save_path)
+        proc_data = prep_data(data, window_vals, special=special, mixtures=mixtures)
+        save_data(proc_data, output_path)
 
     elif special == "5_Cross":
         kf = KFold(n_splits=5)
@@ -319,7 +414,7 @@ def main(
             train_set, test_set = data.iloc[train_index], data.iloc[test_index]
             train_set, val_set = train_test_split(train_set, test_size=0.1)
 
-            out_save_path_fold = os.path.join(out_save_path, f"fold_{i}")
+            out_save_path_fold = os.path.join(output_path, f"fold_{i}", "data")
             os.makedirs(out_save_path_fold, exist_ok=True)
 
             prep_data_pipeline(
@@ -330,18 +425,38 @@ def main(
                 augmentation,
                 special,
                 out_save_path_fold,
+                mixtures
             )
+    elif special == "Scaffold":
+        train_set, test_set, val_set = split_train_test_val_scaffold(
+                data, test_size=0.2, val_size=0.1
+            )
+        # Make data directory
+        out_save_path = os.path.join(output_path, "data")
+        os.makedirs(out_save_path, exist_ok=True)
+        
+        prep_data_pipeline(
+            train_set,
+            test_set,
+            val_set,
+            window_vals,
+            augmentation,
+            special,
+            out_save_path,
+            mixtures
+        )
 
     else:
         if split == "85_10_5":
-            train_set, test_set, val_set = split_train_test_val(
+            train_set, test_set, val_set = split_train_test_val_random(
                 data, test_size=0.1, val_size=0.05
             )
         elif split == "70_20_10":
-            train_set, test_set, val_set = split_train_test_val(
+            train_set, test_set, val_set = split_train_test_val_random(
                 data, test_size=0.2, val_size=0.1
             )
-
+        # Make data directory
+        out_save_path = os.path.join(output_path, "data")
         os.makedirs(out_save_path, exist_ok=True)
 
         prep_data_pipeline(
@@ -352,6 +467,7 @@ def main(
             augmentation,
             special,
             out_save_path,
+            mixtures
         )
 
 
