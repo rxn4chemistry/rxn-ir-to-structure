@@ -63,7 +63,7 @@ The `prepare_data` script creates the input data from the simulated data. It req
 Parameters of the script:
 ```
 --data_path: Path to the pickled dataframe
---output_folder: Path where the processed data is saved
+--output_path: Path where the processed data is saved
 --n_tokens: With how many tokens the spectrum is encoded (default 400)
 --window: What window of the IR spectrum is used, Options: full: Full spectrum, fingerprint: 400-2000<sup>-1</sup>, 
 umir: 400-3982<sup>-1</sup> and merged: 400-2000<sup>-1</sup> with 2800-3200<sup>-1</sup>

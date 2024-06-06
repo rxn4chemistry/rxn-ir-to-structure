@@ -119,3 +119,4 @@ venv.bak/
 # Data
 data/
 emc/
+scripts/

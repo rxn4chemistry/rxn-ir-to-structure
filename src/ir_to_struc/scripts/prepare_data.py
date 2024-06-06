@@ -23,7 +23,7 @@ class AugmentationCallable(Protocol):
 
 
 def load_data(data_path: Path) -> pd.DataFrame:
-    return pd.read_pickle(data_path)
+    return pd.read_parquet(data_path)
 
 
 def split_smiles(smile: str) -> str:
@@ -72,7 +72,7 @@ def get_window(option: str, n_tokens: int, start: str) -> np.ndarray:
     elif start == "800":
         start_val = 800
         end_val = 3980
-    elif start == "N/A":
+    elif start == "400":
         start_val = 400
         end_val = 3980
     else:
@@ -192,7 +192,8 @@ def prep_data(
     new_x: np.ndarray,
     augmentation: Optional[List[AugmentationCallable]] = None,
     special: str = "N/A",
-    mixtures: bool = False
+    mixtures: bool = False,
+    target: str = 'mol'
 ) -> np.ndarray:
     if augmentation is None:
         augmentation = [interpolate_spectrum]
@@ -211,7 +212,12 @@ def prep_data(
         else:
             formula_temp = split_formula(formula.iloc[i])
 
-        tgt_temp = split_smiles(tgt.iloc[i])
+        if target == 'mol':
+            tgt_temp = split_smiles(tgt.iloc[i])
+        elif target == 'formula':
+            tgt_temp = formula_temp
+        else:
+            raise ValueError
 
         spectra_list = list()
 
@@ -288,23 +294,25 @@ def prep_data_pipeline(
     augmentation: str,
     special: str,
     out_save_path: Path,
-    mixtures: bool
+    mixtures: bool,
+    target: str
 ) -> None:
     train_data = prep_data(
         train_set,
         window_vals,
         augmentation=augmentation_options[augmentation],
         special=special,
-        mixtures = mixtures
+        mixtures = mixtures,
+        target=target
     )
     
     save_data_split(train_data, 'train', out_save_path)
     del(train_data)
 
-    test_data = prep_data(test_set, window_vals, special=special, mixtures = mixtures)
+    test_data = prep_data(test_set, window_vals, special=special, mixtures = mixtures, target=target)
     save_data_split(test_data, 'test', out_save_path)
 
-    val_data = prep_data(val_set, window_vals, special=special, mixtures = mixtures)
+    val_data = prep_data(val_set, window_vals, special=special, mixtures = mixtures, target=target)
     save_data_split(val_data, 'val', out_save_path)
 
 
@@ -363,9 +371,10 @@ augmentation_options: Dict[str, List[AugmentationCallable]] = {
     default="N/A",
     type=click.Choice(["N/A", "Formula", "Spectrum", "No_Split", "5_Cross", "Scaffold"]),
 )
-@click.option("--start", default="N/A", type=click.Choice(["N/A", "450", "550", "800"]))
+@click.option("--start", default="400", type=click.Choice(["400", "450", "550", "800"]))
 @click.option("--split", default="85_10_5", type=click.Choice(["85_10_5", "70_20_10"]))
 @click.option("--mixtures", is_flag=True)
+@click.option("--target", default="mol", type=click.Choice(["mol", "formula"]))
 
 def main(
     data_path: Path,
@@ -376,7 +385,8 @@ def main(
     special: str,
     start: str,
     split: str,
-    mixtures: bool
+    mixtures: bool,
+    target: str
 ):
     data = load_data(data_path)
 
@@ -402,7 +412,7 @@ def main(
     window_vals = get_window(window, n_tokens, start)
 
     if special == "No_Split":
-        proc_data = prep_data(data, window_vals, special=special, mixtures=mixtures)
+        proc_data = prep_data(data, window_vals, special=special, mixtures=mixtures, target=target)
         save_data(proc_data, output_path)
 
     elif special == "5_Cross":
@@ -423,7 +433,8 @@ def main(
                 augmentation,
                 special,
                 out_save_path_fold,
-                mixtures
+                mixtures,
+                target
             )
     elif special == "Scaffold":
         train_set, test_set, val_set = split_train_test_val_scaffold(
@@ -441,7 +452,8 @@ def main(
             augmentation,
             special,
             out_save_path,
-            mixtures
+            mixtures,
+            target
         )
 
     else:
@@ -465,7 +477,8 @@ def main(
             augmentation,
             special,
             out_save_path,
-            mixtures
+            mixtures,
+            target
         )
 
 
